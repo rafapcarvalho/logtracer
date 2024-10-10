@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func GinMiddleware(lt *LogTracer, servicename string) gin.HandlerFunc {
+func GinMiddleware(lt *LogTracer, serviceName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
