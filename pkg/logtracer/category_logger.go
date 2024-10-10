@@ -3,13 +3,18 @@ package logtracer
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"log/slog"
+	"runtime"
 	"strings"
+	"time"
 )
+
+type CategoryLogger struct {
+	logger *slog.Logger
+}
 
 func (cl *CategoryLogger) Info(ctx context.Context, msg string, args ...any) {
 	cl.log(ctx, LevelInfo, msg, args...)
@@ -27,27 +32,46 @@ func (cl *CategoryLogger) Debug(ctx context.Context, msg string, args ...any) {
 	cl.log(ctx, LevelDebug, msg, args...)
 }
 
-func (cl *CategoryLogger) Gin(ctx context.Context, msg string, args ...any) {
-	cl.log(ctx, LevelInfo, msg, args...)
+func (cl *CategoryLogger) Infof(ctx context.Context, msg string, args ...any) {
+	cl.logf(ctx, LevelInfo, msg, args...)
 }
 
-func (cl *CategoryLogger) Grpc(ctx context.Context, msg string, args ...any) {
-	cl.log(ctx, LevelInfo, msg, args...)
+func (cl *CategoryLogger) Errorf(ctx context.Context, msg string, args ...any) {
+	cl.logf(ctx, LevelError, msg, args...)
+}
+
+func (cl *CategoryLogger) Warnf(ctx context.Context, msg string, args ...any) {
+	cl.logf(ctx, LevelWarn, msg, args...)
+}
+
+func (cl *CategoryLogger) Debugf(ctx context.Context, msg string, args ...any) {
+	cl.logf(ctx, LevelDebug, msg, args...)
 }
 
 func (cl *CategoryLogger) log(ctx context.Context, level LogLevel, msg string, args ...any) {
+	var slogLevel = getLogLevel(level)
 	id := getOrCreateTraceID(ctx)
 
-	var slogLevel = getLogLevel(level)
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:])
+	r := slog.NewRecord(time.Now(), slogLevel, msg, pcs[0])
+	if id != "" {
+		r.Add("id", id)
+	}
+	r.Add(args...)
+	_ = cl.logger.Handler().Handle(ctx, r)
 
-	cl.logger.Log(ctx, slogLevel, msg, append([]any{"id", id, "severity", level.String()}, args...)...)
-
-	if cl.tracer != nil {
-		recordLogSpan(ctx, level, msg, args)
+	if globalTracer != nil {
+		recordLogSpan(ctx, level, msg, args...)
 	}
 }
 
 func (cl *CategoryLogger) logf(ctx context.Context, level LogLevel, format string, args ...any) {
+	var slogLevel = getLogLevel(level)
+	if !cl.logger.Enabled(ctx, slogLevel) {
+		return
+	}
+
 	id := getOrCreateTraceID(ctx)
 
 	format = strings.ReplaceAll(format, "/", "∕")
@@ -57,39 +81,73 @@ func (cl *CategoryLogger) logf(ctx context.Context, level LogLevel, format strin
 		}
 	}
 
-	var slogLevel = getLogLevel(level)
+	var pcs [1]uintptr
+	runtime.Callers(3, pcs[:])
+	r := slog.NewRecord(time.Now(), slogLevel, fmt.Sprintf(format, args...), pcs[0])
+	if id != "" {
+		r.Add("id", id)
+	}
+	_ = cl.logger.Handler().Handle(ctx, r)
 
-	cl.logger.Log(ctx, slogLevel, fmt.Sprintf(format, args...), append([]any{"id", id})...)
-
-	if cl.tracer != nil {
-		recordLogSpan(ctx, level, format, args)
+	if globalTracer != nil {
+		recordLogSpan(ctx, level, format, args...)
 	}
 }
 
 func getOrCreateTraceID(ctx context.Context) string {
-	if id, ok := ctx.Value("trace_id").(string); ok {
-		return id
+	spanCtx := trace.SpanContextFromContext(ctx)
+	if spanCtx.IsValid() {
+		return spanCtx.TraceID().String()
 	}
-	return uuid.New().String()
+	return ""
 }
 
 func recordLogSpan(ctx context.Context, level LogLevel, msg string, args ...any) {
-	span := trace.SpanFromContext(ctx)
-	if span.IsRecording() {
-		attrs := []attribute.KeyValue{
-			attribute.String("log.severity", level.String()),
-			attribute.String("log.message", fmt.Sprintf(msg, args...)),
+	ctx, span := StartSpan(ctx, "log")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("log.level", level.String()),
+		attribute.String("log.message", msg),
+	)
+
+	for i := 0; i < len(args); i += 2 {
+		if i+1 < len(args) {
+			key, ok := args[i].(string)
+			if ok {
+				span.SetAttributes(attribute.String(key, fmt.Sprint(args[i+1])))
+			}
 		}
-		switch level {
-		case LevelError:
-			span.SetStatus(codes.Error, msg)
-			span.RecordError(fmt.Errorf(msg))
+	}
+
+	if level == LevelError {
+		span.SetStatus(codes.Error, msg)
+		span.RecordError(fmt.Errorf(msg))
+	} /*
 		case LevelWarn:
 			span.AddEvent("warning", trace.WithAttributes(attrs...))
 		default:
 			span.AddEvent("log", trace.WithAttributes(attrs...))
 		}
-	}
+
+
+		span := trace.SpanFromContext(ctx)
+		if span.IsRecording() {
+			msg := fmt.Sprintf(msg, args...)
+			attrs := []attribute.KeyValue{
+				attribute.String("log.severity", level.String()),
+				attribute.String("log.message", msg),
+			}
+			switch level {
+			case LevelError:
+				span.SetStatus(codes.Error, msg)
+				span.RecordError(fmt.Errorf(msg))
+			case LevelWarn:
+				span.AddEvent("warning", trace.WithAttributes(attrs...))
+			default:
+				span.AddEvent("log", trace.WithAttributes(attrs...))
+			}
+		}*/
 }
 
 func getLogLevel(level LogLevel) slog.Level {

@@ -20,11 +20,6 @@ func (l LogLevel) String() string {
 	return [...]string{"Info", "Error", "Warn", "Debug"}[l]
 }
 
-type CategoryLogger struct {
-	logger *slog.Logger
-	tracer tracer.Tracer
-}
-
 type LogTracer struct {
 	logger         *slog.Logger
 	tracerProvider *provider.TracerProvider

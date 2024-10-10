@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"time"
 )
 
-func GinMiddleware(lt *LogTracer, serviceName string) gin.HandlerFunc {
+func GinMiddleware(serviceName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		SetLevel(LevelInfo)
 		start := time.Now()
 		path := c.Request.URL.Path
 		query := c.Request.URL.RawQuery
@@ -25,14 +27,38 @@ func GinMiddleware(lt *LogTracer, serviceName string) gin.HandlerFunc {
 			path = fmt.Sprintf("%s?%s", path, query)
 		}
 
-		lt.Categories["GIN"].Info(c.Request.Context(),
+		logHTTPRequest(
+			c.Request.Context(),
+			c.Writer.Status(),
+			c.Request.Method,
+			path,
+			c.ClientIP(),
+			latency,
+			c.Request.UserAgent(),
+		)
+	}
+}
+
+func logHTTPRequest(ctx context.Context, status int, method, path, ip string, latency time.Duration, userAgent string) {
+	if status >= 400 {
+		ginLog.Error(ctx,
 			"HTTP request",
-			"status", c.Writer.Status(),
-			"method", c.Request.Method,
+			"status", status,
+			"method", method,
 			"path", path,
-			"ip", c.ClientIP(),
+			"ip", ip,
 			"latency", latency,
-			"user-agent", c.Request.UserAgent(),
+			"user-agent", userAgent,
+		)
+	} else {
+		ginLog.Info(ctx,
+			"HTTP request",
+			"status", status,
+			"method", method,
+			"path", path,
+			"ip", ip,
+			"latency", latency,
+			"user-agent", userAgent,
 		)
 	}
 }
@@ -65,10 +91,10 @@ func (lt *LogTracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 		b3Headers := extractB3Headers(ctx)
 		newCtx := lt.propagator.Extract(ctx, propagation.MapCarrier(b3Headers))
-		newCtx, span := lt.StartSpan(newCtx, info.FullMethod)
+		newCtx, span := StartSpan(newCtx, info.FullMethod)
 		defer span.End()
 
-		lt.AddAtribute(newCtx, "grpc.Method", info.FullMethod)
+		AddAttribute(newCtx, "grpc.Method", info.FullMethod)
 
 		resp, err := handler(newCtx, req)
 
@@ -78,7 +104,7 @@ func (lt *LogTracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 			statusCode = "ERROR"
 		}
 
-		lt.Categories["GRPC"].Info(newCtx,
+		grpcLog.Info(newCtx,
 			"gRPC request",
 			"method", info.FullMethod,
 			"duration", duration,
@@ -94,10 +120,10 @@ func (lt *LogTracer) StreamServerInterceptor() grpc.StreamServerInterceptor {
 
 		b3Headers := extractB3Headers(ss.Context())
 		newCtx := lt.propagator.Extract(ss.Context(), propagation.MapCarrier(b3Headers))
-		newCtx, span := lt.StartSpan(newCtx, info.FullMethod)
+		newCtx, span := StartSpan(newCtx, info.FullMethod)
 		defer span.End()
 
-		lt.AddAtribute(newCtx, "grpc.method", info.FullMethod)
+		AddAttribute(newCtx, "grpc.method", info.FullMethod)
 
 		wrapped := &wrappedServerStream{ServerStream: ss, ctx: newCtx}
 		err := handler(srv, wrapped)
@@ -108,7 +134,7 @@ func (lt *LogTracer) StreamServerInterceptor() grpc.StreamServerInterceptor {
 			statusCode = "ERROR"
 		}
 
-		lt.SrvcLog.Info(newCtx,
+		grpcLog.Info(newCtx,
 			"gRPC stream",
 			"method", info.FullMethod,
 			"duration", duration,
@@ -126,4 +152,71 @@ type wrappedServerStream struct {
 
 func (w *wrappedServerStream) Context() context.Context {
 	return w.ctx
+}
+
+func (lt *LogTracer) UnaryClientInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		startTime := time.Now()
+
+		newCtx, span := StartSpan(ctx, method)
+		defer span.End()
+
+		AddAttribute(newCtx, "grpc.method", method)
+
+		err := invoker(newCtx, method, req, reply, cc, opts...)
+
+		duration := time.Since(startTime)
+		statusCode := "OK"
+		if err != nil {
+			statusCode = "ERROR"
+		}
+
+		grpcLog.Info(newCtx,
+			"gRPC client request",
+			"method", method,
+			"duration", duration,
+			"status", statusCode,
+		)
+
+		return err
+	}
+}
+
+// StreamClientInterceptor returns a gRPC stream client interceptor for logging and tracing
+func (lt *LogTracer) StreamClientInterceptor() grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		startTime := time.Now()
+
+		newCtx, span := StartSpan(ctx, method)
+		defer span.End()
+
+		AddAttribute(newCtx, "grpc.method", method)
+
+		clientStream, err := streamer(newCtx, desc, cc, method, opts...)
+
+		duration := time.Since(startTime)
+		statusCode := "OK"
+		if err != nil {
+			statusCode = "ERROR"
+		}
+
+		grpcLog.Info(newCtx,
+			"gRPC client stream",
+			"method", method,
+			"duration", duration,
+			"status", statusCode,
+		)
+
+		return clientStream, err
+	}
+}
+
+// OTELGRPCServerInterceptor returns OpenTelemetry gRPC server interceptors
+func OTELGRPCServerInterceptor() (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
+	return otelgrpc.UnaryServerInterceptor(), otelgrpc.StreamServerInterceptor()
+}
+
+// OTELGRPCClientInterceptor returns OpenTelemetry gRPC client interceptors
+func OTELGRPCClientInterceptor() (grpc.UnaryClientInterceptor, grpc.StreamClientInterceptor) {
+	return otelgrpc.UnaryClientInterceptor(), otelgrpc.StreamClientInterceptor()
 }

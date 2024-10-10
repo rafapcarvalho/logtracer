@@ -5,24 +5,21 @@ import (
 	"fmt"
 	"go.opentelemetry.io/otel/attribute"
 	tracer "go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
-func (lt *LogTracer) StartSpan(ctx context.Context, name string, opts ...tracer.SpanStartOption) (context.Context, tracer.Span) {
-	if lt.tracer != nil {
-		ctx, span := lt.tracer.Start(ctx, name, opts...)
-		if spanContext := span.SpanContext(); spanContext.IsValid() {
-			ctx = context.WithValue(ctx, "trace_id", spanContext.TraceID().String())
-		}
-		return ctx, span
+func StartSpan(ctx context.Context, name string, opts ...tracer.SpanStartOption) (context.Context, tracer.Span) {
+	if globalTracer != nil {
+		return globalTracer.Start(ctx, name, opts...)
 	}
-	return ctx, nil
+	noopTrace := noop.NewTracerProvider()
+	noopNewTracer := noopTrace.Tracer("")
+	return noopNewTracer.Start(ctx, name, opts...)
 }
 
-func (lt *LogTracer) AddAtribute(ctx context.Context, key string, value interface{}) {
-	if lt.tracer != nil {
-		span := tracer.SpanFromContext(ctx)
-		if span.IsRecording() {
-			span.SetAttributes(attribute.String(key, fmt.Sprint(value)))
-		}
+func AddAttribute(ctx context.Context, key string, value interface{}) {
+	span := tracer.SpanFromContext(ctx)
+	if span.IsRecording() {
+		span.SetAttributes(attribute.String(key, fmt.Sprint(value)))
 	}
 }

@@ -3,6 +3,7 @@ package logtracer
 import (
 	"context"
 	"fmt"
+	"github.com/rafapcarvalho/logtracer/internal/handlers"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -12,69 +13,74 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.opentelemetry.io/otel/trace"
 	"log/slog"
-	"os"
 	"strings"
+	"sync"
+	"time"
 )
 
-var LoggerLevel = new(slog.LevelVar)
+var (
+	ginLog     *CategoryLogger
+	grpcLog    *CategoryLogger
+	InitLog    *CategoryLogger
+	CfgLog     *CategoryLogger
+	SrvcLog    *CategoryLogger
+	TstLog     *CategoryLogger
+	Categories map[string]*CategoryLogger
 
-func New(cfg Config) (*LogTracer, error) {
-	var handler slog.Handler
+	globalTracer  trace.Tracer
+	traceProvider *sdktrace.TracerProvider
+	propagator    propagation.TextMapPropagator
+	shutdownOnce  sync.Once
+)
+
+func InitLogger(cfg Config) {
+	var logger *slog.Logger
 	logFormat := strings.ToLower(cfg.LogFormat)
 	if logFormat == "json" {
-		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level: LoggerLevel,
-		})
+		logger = slog.New(handlers.StdoutJSON())
 	} else {
-		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: LoggerLevel,
-		})
+		logger = slog.New(handlers.StdoutTXT())
 	}
-
-	logger := slog.New(handler)
-
-	var tp *sdktrace.TracerProvider
-	var tracer trace.Tracer
-	var err error
 
 	if cfg.EnableTracing {
-		tp, err = initTracerProvider(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize tracer provider: %w", err)
+		var err error
+		traceProvider, err = initTracerProvider(cfg)
+		if err == nil {
+			globalTracer = traceProvider.Tracer(cfg.ServiceName)
+			otel.SetTracerProvider(traceProvider)
+
+			propagator = propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+			otel.SetTextMapPropagator(propagator)
+		} else {
+			logger.Error("Failed to initialize tracer provider: %w", err)
 		}
-		tracer = tp.Tracer(cfg.ServiceName)
 	}
 
-	propagator := propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
+	InitLog = newCategoryLogger(logger, cfg.ServiceName, "INIT")
+	CfgLog = newCategoryLogger(logger, cfg.ServiceName, "CFG")
+	SrvcLog = newCategoryLogger(logger, cfg.ServiceName, "SRVC")
+	TstLog = newCategoryLogger(logger, cfg.ServiceName, "TEST")
+	ginLog = newCategoryLogger(logger, cfg.ServiceName, "GIN")
+	grpcLog = newCategoryLogger(logger, cfg.ServiceName, "GRPC")
 
-	lt := &LogTracer{
-		logger:         logger,
-		tracerProvider: tp,
-		tracer:         tracer,
-		propagator:     propagator,
-		Categories:     make(map[string]*CategoryLogger),
-	}
-
-	lt.InitLog = lt.newCategoryLogger(cfg.ServiceName, "INIT")
-	lt.CfgLog = lt.newCategoryLogger(cfg.ServiceName, "CFG")
-	lt.SrvcLog = lt.newCategoryLogger(cfg.ServiceName, "SRV")
-	lt.TstLog = lt.newCategoryLogger(cfg.ServiceName, "TST")
-
-	return lt, nil
+	Categories = make(map[string]*CategoryLogger)
 }
 
-func (lt *LogTracer) newCategoryLogger(serviceName, category string) *CategoryLogger {
+func newCategoryLogger(logger *slog.Logger, serviceName, category string) *CategoryLogger {
 	return &CategoryLogger{
-		logger: lt.logger.With("component", serviceName, "category", category),
-		tracer: lt.tracer,
+		logger: logger.With("component", serviceName, "category", category),
 	}
 }
 
 func initTracerProvider(cfg Config) (*sdktrace.TracerProvider, error) {
-	exporter, err := otlptracehttp.New(context.Background(),
+	ctx := context.Background()
+
+	exporter, err := otlptracehttp.New(
+		ctx,
 		otlptracehttp.WithEndpoint(cfg.OTLPEndpoint),
 		otlptracehttp.WithInsecure(),
 	)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
@@ -86,31 +92,31 @@ func initTracerProvider(cfg Config) (*sdktrace.TracerProvider, error) {
 		resourceAttrs = append(resourceAttrs, attribute.String(k, v))
 	}
 
-	rsrc := resource.NewWithAttributes(semconv.SchemaURL, resourceAttrs...)
+	res := resource.NewWithAttributes(semconv.SchemaURL, resourceAttrs...)
+	resource.WithProcessRuntimeDescription()
+	resource.WithTelemetrySDK()
 
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
-		sdktrace.WithResource(rsrc),
+		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)
 
 	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(
-		propagation.NewCompositeTextMapPropagator(
-			propagation.TraceContext{}, propagation.Baggage{},
-		),
-	)
-
+	otel.SetTextMapPropagator(propagator)
 	return tp, nil
 }
 
-func (lt *LogTracer) Shutdown(ctx context.Context) error {
-	if lt.tracerProvider != nil {
-		return lt.tracerProvider.Shutdown(ctx)
+func Shutdown(ctx context.Context) error {
+	if traceProvider != nil {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		return traceProvider.Shutdown(ctx)
 	}
 	return nil
 }
 
-func (lt *LogTracer) SetLogLevel(level LogLevel) {
+func SetLevel(level LogLevel) {
 	var slogLevel slog.Level
 	switch level {
 	case LevelInfo:
@@ -124,5 +130,5 @@ func (lt *LogTracer) SetLogLevel(level LogLevel) {
 	default:
 		slogLevel = slog.LevelInfo
 	}
-	LoggerLevel.Set(slogLevel)
+	handlers.LoggerLevel.Set(slogLevel)
 }
