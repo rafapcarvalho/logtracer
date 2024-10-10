@@ -25,7 +25,7 @@ func GinMiddleware(lt *LogTracer, servicename string) gin.HandlerFunc {
 			path = fmt.Sprintf("%s?%s", path, query)
 		}
 
-		lt.HttpLog.Info(c.Request.Context(),
+		lt.Categories["GIN"].Info(c.Request.Context(),
 			"HTTP request",
 			"status", c.Writer.Status(),
 			"method", c.Request.Method,
@@ -78,7 +78,7 @@ func (lt *LogTracer) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 			statusCode = "ERROR"
 		}
 
-		lt.SrvcLog.Info(newCtx,
+		lt.Categories["GRPC"].Info(newCtx,
 			"gRPC request",
 			"method", info.FullMethod,
 			"duration", duration,
