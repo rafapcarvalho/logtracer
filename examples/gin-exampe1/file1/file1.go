@@ -6,8 +6,8 @@ import (
 )
 
 func CallFile1(ctx context.Context) {
-	ctx, span := logger.StartSpan(ctx, "callFile1")
-	defer span.End()
+	ctx = logger.StartSpan(ctx, "callFile1")
+	defer logger.EndSpan(ctx)
 
 	logger.TstLog.Error(ctx, "menssagem do novo", "arquivo", "file1")
 }
