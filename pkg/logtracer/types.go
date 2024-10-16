@@ -7,19 +7,6 @@ import (
 	"log/slog"
 )
 
-type LogLevel int
-
-const (
-	LevelInfo LogLevel = iota
-	LevelError
-	LevelWarn
-	LevelDebug
-)
-
-func (l LogLevel) String() string {
-	return [...]string{"Info", "Error", "Warn", "Debug"}[l]
-}
-
 type LogTracer struct {
 	logger         *slog.Logger
 	tracerProvider *provider.TracerProvider
@@ -29,10 +16,34 @@ type LogTracer struct {
 	CfgLog         *CategoryLogger
 	SrvcLog        *CategoryLogger
 	TstLog         *CategoryLogger
+	NoTrace        WithoutTracer
 	Categories     map[string]*CategoryLogger
 }
 
+type SpanOption func(*SpanOptions)
+
+type SpanOptions struct {
+	Attributes map[string]string
+	ID         string
+}
+
+func WithAttribute(key, value string) SpanOption {
+	return func(o *SpanOptions) {
+		if o.Attributes == nil {
+			o.Attributes = make(map[string]string)
+		}
+		o.Attributes[key] = value
+	}
+}
+
+func WithId(id string) SpanOption {
+	return func(o *SpanOptions) {
+		o.ID = id
+	}
+}
+
 type Config struct {
+	CustomID           string
 	ServiceName        string
 	LogFormat          string
 	EnableTracing      bool
