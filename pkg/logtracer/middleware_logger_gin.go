@@ -36,6 +36,7 @@ func GinMiddleware(serviceName string) gin.HandlerFunc {
 }
 
 func logHTTPRequest(ctx context.Context, status int, method, path, ip string, latency time.Duration, userAgent string) {
+	latencyStr := formatLatency(latency)
 	if status >= 400 {
 		ginLog.Error(ctx,
 			"HTTP request",
@@ -43,7 +44,7 @@ func logHTTPRequest(ctx context.Context, status int, method, path, ip string, la
 			"method", method,
 			"path", path,
 			"ip", ip,
-			"latency", latency,
+			"latency", latencyStr,
 			"user-agent", userAgent,
 		)
 	} else {
@@ -53,10 +54,20 @@ func logHTTPRequest(ctx context.Context, status int, method, path, ip string, la
 			"method", method,
 			"path", path,
 			"ip", ip,
-			"latency", latency,
+			"latency", latencyStr,
 			"user-agent", userAgent,
 		)
 	}
+}
+
+func formatLatency(d time.Duration) string {
+	if d > time.Second {
+		return fmt.Sprintf("%.2fs", d.Seconds())
+	}
+	if d > time.Millisecond {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%dµs", d.Microseconds())
 }
 
 func OTELMiddleware(serviceName string) gin.HandlerFunc {

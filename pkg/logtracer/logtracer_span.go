@@ -17,10 +17,6 @@ func StartSpan(ctx context.Context, name string, opts ...SpanOption) context.Con
 		opt(options)
 	}
 
-	/*if options.ID != "" {
-		ctx = context.WithValue(ctx, customIDKey{}, options.ID)
-	}
-	*/
 	if customID != "" {
 		ctx = context.WithValue(ctx, customID.String(), options.ID)
 	}
@@ -31,9 +27,7 @@ func StartSpan(ctx context.Context, name string, opts ...SpanOption) context.Con
 		for k, v := range options.Attributes {
 			attrs = append(attrs, attribute.String(k, v))
 		}
-		/*		if ctx.Value(customID.String()).(string) != "" {
-				attrs = append(attrs, attribute.String("custom.id", ctx.Value(customID.String()).(string)))
-			}*/
+
 		if options.ID != "" {
 			attrs = append(attrs, attribute.String("custom.id", options.ID))
 		}

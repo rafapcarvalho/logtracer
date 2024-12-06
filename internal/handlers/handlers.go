@@ -25,11 +25,7 @@ func StdoutTXT() slog.Handler {
 	})
 }
 
-func replace(groups []string, a slog.Attr) slog.Attr {
-	/*	if a.Key == slog.SourceKey || len(groups) == 0 {
-			a.Value = slog.StringValue(strings.TrimRight(filepath.Base(a.Value.String()), "}"))
-		}
-		return a*/
+func replace(_ []string, a slog.Attr) slog.Attr {
 	if a.Key == slog.SourceKey {
 		if src, ok := a.Value.Any().(*slog.Source); ok {
 			function := filepath.Base(src.Function) // Pega apenas o nome da função, sem o pacote
