@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func GinMiddleware(serviceName string) gin.HandlerFunc {
+func GinMiddleware(_ string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		SetLevel(LevelInfo)
 		start := time.Now()

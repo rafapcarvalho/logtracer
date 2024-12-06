@@ -12,16 +12,6 @@ import (
 	"testing"
 )
 
-type logEntry struct {
-	Time      string `json:"time"`
-	Level     string `json:"level"`
-	Source    string `json:"source"`
-	Msg       string `json:"msg"`
-	Component string `json:"component"`
-	Category  string `json:"category"`
-	ID        string `json:"id,omitempty"`
-}
-
 func TestInitLogger(t *testing.T) {
 	cleanup := func() {
 		InitLog = nil
