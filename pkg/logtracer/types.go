@@ -7,6 +7,12 @@ import (
 	"log/slog"
 )
 
+type CustomID string
+
+func (id CustomID) String() string {
+	return string(id)
+}
+
 type LogTracer struct {
 	logger         *slog.Logger
 	tracerProvider *provider.TracerProvider

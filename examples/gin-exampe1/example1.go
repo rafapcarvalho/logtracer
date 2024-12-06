@@ -17,14 +17,14 @@ import (
 
 func main() {
 	cfg := logger.Config{
-		CustomID:      "sessionID",
+		//CustomID:      "sessionID",
 		ServiceName:   "example-service",
 		LogFormat:     "json",
-		EnableTracing: true,
-		OTLPEndpoint:  "localhost:4318",
-		AdditionalResource: map[string]string{
-			"environment": "production",
-		},
+		EnableTracing: false,
+		//OTLPEndpoint:  "localhost:4318",
+		//AdditionalResource: map[string]string{
+		//	"environment": "production",
+		//},
 	}
 
 	logger.InitLogger(cfg)

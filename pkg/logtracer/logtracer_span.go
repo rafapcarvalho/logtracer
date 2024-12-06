@@ -21,18 +21,22 @@ func StartSpan(ctx context.Context, name string, opts ...SpanOption) context.Con
 		ctx = context.WithValue(ctx, customIDKey{}, options.ID)
 	}
 	*/
+	if customID != "" {
+		ctx = context.WithValue(ctx, customID.String(), options.ID)
+	}
+
 	var span tracer.Span
 	if globalTracer != nil {
 		var attrs []attribute.KeyValue
 		for k, v := range options.Attributes {
 			attrs = append(attrs, attribute.String(k, v))
 		}
-		if ctx.Value(customID).(string) != "" {
-			attrs = append(attrs, attribute.String("custom.id", ctx.Value(customID).(string)))
-		}
-		/*	if options.ID != "" {
+		/*		if ctx.Value(customID.String()).(string) != "" {
+				attrs = append(attrs, attribute.String("custom.id", ctx.Value(customID.String()).(string)))
+			}*/
+		if options.ID != "" {
 			attrs = append(attrs, attribute.String("custom.id", options.ID))
-		}*/
+		}
 		ctx, span = globalTracer.Start(ctx, name, tracer.WithAttributes(attrs...))
 	} else {
 		noopTrace := noop.NewTracerProvider()
@@ -58,7 +62,7 @@ func EndSpan(ctx context.Context) {
 }
 
 func GetCustomID(ctx context.Context) string {
-	id, _ := ctx.Value(customID).(string)
+	id, _ := ctx.Value(customID.String()).(string)
 	return id
 }
 

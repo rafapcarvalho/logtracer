@@ -21,7 +21,7 @@ var (
 	TstLog     *CategoryLogger
 	Categories map[string]*CategoryLogger
 	NoTrace    WithoutTracer
-	customID   string
+	customID   CustomID
 
 	globalTracer  trace.Tracer
 	traceProvider *sdktrace.TracerProvider
@@ -48,12 +48,12 @@ func InitLogger(cfg Config) {
 			propagator = propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 			otel.SetTextMapPropagator(propagator)
 		} else {
-			logger.Error("Failed to initialize tracer provider: %w", err)
+			logger.Error("Failed to initialize tracer provider", "error", err)
 		}
 	}
 
 	if cfg.CustomID != "" {
-		customID = cfg.CustomID
+		customID = CustomID(cfg.CustomID)
 	}
 
 	InitLog = newCategoryLogger(logger, cfg.ServiceName, "INIT")

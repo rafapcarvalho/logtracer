@@ -22,6 +22,10 @@ func initTracerProvider(cfg Config) (*sdktrace.TracerProvider, error) {
 	)
 
 	if err != nil {
+		SrvcLog.Error(ctx, "Failed to create OTLP exporter",
+			"error", err,
+			"endpoint", cfg.OTLPEndpoint,
+		)
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}
 
@@ -42,9 +46,18 @@ func initTracerProvider(cfg Config) (*sdktrace.TracerProvider, error) {
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)
 
+	otel.SetErrorHandler(&errorLogger{})
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagator)
 	return tp, nil
+}
+
+type errorLogger struct{}
+
+func (e errorLogger) Handle(err error) {
+	SrvcLog.Error(context.Background(), "Trace export failed",
+		"error", err,
+	)
 }
 
 func Shutdown(ctx context.Context) error {
