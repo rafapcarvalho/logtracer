@@ -8,7 +8,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"log/slog"
 	"strings"
-	"sync"
 )
 
 var (
@@ -26,7 +25,7 @@ var (
 	globalTracer  trace.Tracer
 	traceProvider *sdktrace.TracerProvider
 	propagator    propagation.TextMapPropagator
-	shutdownOnce  sync.Once
+	// shutdownOnce  sync.Once
 )
 
 func InitLogger(cfg Config) {

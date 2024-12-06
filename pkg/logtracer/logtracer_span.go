@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
-type customIDKey struct{}
+// type customIDKey struct{}
 
 func StartSpan(ctx context.Context, name string, opts ...SpanOption) context.Context {
 	options := &SpanOptions{}
