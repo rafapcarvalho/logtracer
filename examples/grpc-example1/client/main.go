@@ -3,36 +3,42 @@ package main
 import (
 	"context"
 	pb "github.com/rafapcarvalho/logtracer/examples/grpc-example1/proto"
-	"github.com/rafapcarvalho/logtracer/pkg/logtracer"
+	logger "github.com/rafapcarvalho/logtracer/pkg/logtracer"
 	"google.golang.org/grpc"
-	"log"
+	"google.golang.org/grpc/credentials/insecure"
 	"os"
 	"time"
 )
 
 func main() {
-	cfg := logtracer.Config{
+	cfg := logger.Config{
 		ServiceName:   "grpc-client",
 		LogFormat:     "json",
 		EnableTracing: true,
 		OTLPEndpoint:  "localhost:4318",
 	}
 
-	lt, err := logtracer.New(cfg)
-	if err != nil {
-		log.Fatalf("Failed to create LogTracer: %v", err)
-	}
-	defer lt.Shutdown(context.Background())
+	logger.InitLogger(cfg)
 
-	conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure(),
-		grpc.WithUnaryInterceptor(lt.UnaryClientInterceptor()),
-		grpc.WithStreamInterceptor(lt.StreamClientInterceptor()),
+	logTracer := &logger.LogTracer{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, "localhost:50051",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(logTracer.UnaryClientInterceptor()),
 	)
 	if err != nil {
-		lt.SrvcLog.Error(context.Background(), "Failed to connect to server", "error", err)
+		logger.SrvcLog.Error(context.Background(), "Failed to connect to server", "error", err)
 		return
 	}
-	defer conn.Close()
+	defer func(conn *grpc.ClientConn) {
+		err := conn.Close()
+		if err != nil {
+			logger.SrvcLog.Error(context.Background(), "Failed to close connection", "error", err)
+		}
+	}(conn)
 
 	c := pb.NewGreeterClient(conn)
 
@@ -41,14 +47,14 @@ func main() {
 		name = os.Args[1]
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	r, err := c.SayHello(ctx, &pb.HelloRequest{Name: name})
 	if err != nil {
-		lt.SrvcLog.Error(ctx, "Failed to call SayHello", "error", err)
+		logger.SrvcLog.Error(ctx, "Failed to call SayHello", "error", err)
 		return
 	}
 
-	lt.SrvcLog.Info(ctx, "Greeting received", "message", r.GetMessage())
+	logger.SrvcLog.Info(ctx, "Greeting received", "message", r.GetMessage())
 }

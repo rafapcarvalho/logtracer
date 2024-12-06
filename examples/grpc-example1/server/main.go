@@ -3,59 +3,53 @@ package main
 import (
 	"context"
 	pb "github.com/rafapcarvalho/logtracer/examples/grpc-example1/proto"
-	"github.com/rafapcarvalho/logtracer/pkg/logtracer"
+	logger "github.com/rafapcarvalho/logtracer/pkg/logtracer"
 	"google.golang.org/grpc"
-	"log"
 	"net"
 )
 
 type server struct {
 	pb.UnimplementedGreeterServer
-	lt *logtracer.LogTracer
 }
 
 func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
-	s.lt.SrvcLog.Info(ctx, "Received: "+in.GetName())
+	ctx = logger.StartSpan(ctx, "SayHello")
+	defer logger.EndSpan(ctx)
+
+	logger.SrvcLog.Info(ctx, "handling request", "name", in.Name)
 	return &pb.HelloReply{Message: "Hello " + in.GetName()}, nil
 }
 
 func main() {
-	cfg := logtracer.Config{
+	cfg := logger.Config{
 		ServiceName:   "grpc-server",
 		LogFormat:     "json",
 		EnableTracing: true,
 		OTLPEndpoint:  "localhost:4318",
 	}
 
-	lt, err := logtracer.New(cfg)
-	if err != nil {
-		log.Fatalf("Failed to create LogTracer: %v", err)
-	}
-	defer lt.Shutdown(context.Background())
+	logger.InitLogger(cfg)
 
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
-		lt.InitLog.Error(context.Background(), "Failed to listen", "error", err)
+		logger.InitLog.Error(context.Background(), "Failed to listen", "error", err)
 		return
 	}
 
-	unaryInterceptor, streamInterceptor := logtracer.OTELGRPCServerInterceptor()
+	logTracer := &logger.LogTracer{}
+	unaryInterceptor, _ := logger.OTELGRPCServerInterceptor()
 
 	s := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
-			lt.UnaryServerInterceptor(),
+			logTracer.UnaryServerInterceptor(),
 			unaryInterceptor,
-		),
-		grpc.ChainStreamInterceptor(
-			lt.StreamServerInterceptor(),
-			streamInterceptor,
 		),
 	)
 
-	pb.RegisterGreeterServer(s, &server{lt: lt})
+	pb.RegisterGreeterServer(s, &server{})
+	logger.SrvcLog.Info(context.Background(), "Server starting", "port", 50051)
 
-	lt.SrvcLog.Info(context.Background(), "Server listening", "addres", ":50051")
 	if err := s.Serve(lis); err != nil {
-		lt.SrvcLog.Error(context.Background(), "Failed to serve", "error", err)
+		logger.SrvcLog.Error(context.Background(), "Failed to serve", "error", err)
 	}
 }
